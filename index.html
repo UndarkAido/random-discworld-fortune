@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Discworld Fortunes — Full Screen (Transparent in iframe)</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { height: 100%; }
+
+    /* Default (standalone) look */
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+      margin: 0;
+      line-height: 1.5;
+      min-height: 100svh;
+      display: grid;
+      grid-template-rows: 1fr auto; /* quote grows, source at bottom */
+      box-sizing: border-box;
+      padding: clamp(16px, 4vw, 48px);
+      background:
+        radial-gradient(1000px 600px at 10% 10%, rgba(255,255,255,0.04), transparent) no-repeat,
+        radial-gradient(800px 500px at 90% 90%, rgba(255,255,255,0.04), transparent) no-repeat;
+    }
+
+    blockquote {
+      margin: 0;
+      font-weight: 500;
+      white-space: pre-wrap; /* preserve newlines from input */
+      overflow: hidden;      /* prevent scrollbars while fitting */
+      align-self: center;    /* visual balance */
+      /* font-size set dynamically */
+    }
+
+    .source {
+      margin-top: 0.75rem;
+      font-size: clamp(0.9rem, 1.2vw + 0.2rem, 1rem);
+      color: color-mix(in oklab, CanvasText 60%, transparent);
+      font-style: italic;
+      align-self: end;
+    }
+
+    /* Embedded mode: make everything transparent so parent shows through */
+    body.embedded { background: transparent !important; }
+  </style>
+</head>
+<body>
+  <blockquote id="quote" aria-live="polite"></blockquote>
+  <div class="source" id="source"></div>
+
+  <script type="application/javascript">
+    /* Detect iframe and make background transparent when embedded */
+    (function () {
+      var embedded = false;
+      try { embedded = (window.self !== window.top); } catch (e) { embedded = true; }
+      if (embedded) { document.body.classList.add("embedded"); }
+    }());
+
+    const FORTUNE_PATH = "fortune-discworld/discworld"; // relative path requested
+
+    function parseEntries(raw) {
+      // Split entries on a line that contains only '%'
+      const chunks = raw
+        .split(new RegExp("\\n\\s*%\\s*\\n", "g"))
+        .map(function (chunk) { return chunk.trim(); })
+        .filter(function (s) { return s.length > 0; });
+
+      // For each chunk: everything but the last non-empty line is the quote; last non-empty line is (Source)
+      const sourceRe = new RegExp("^\\((.*)\\)$");
+      return chunks.map(function (chunk) {
+        const lines = chunk.split(new RegExp("\\n", "g"))
+          .map(function (l) { return l.trim(); })
+          .filter(function (l) { return l.length > 0; });
+
+        const last = lines.length ? lines[lines.length - 1] : "";
+        const source = last.replace(sourceRe, "$1").trim();
+        const quote = lines.slice(0, -1).join("\n");
+        return { quote: quote, source: source };
+      }).filter(function (e) { return e.quote.length > 0 && e.source.length > 0; });
+    }
+
+    function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    // Fit text in the available height using binary search for font-size
+    function fitQuoteToViewport() {
+      const quoteEl = document.getElementById("quote");
+      const sourceEl = document.getElementById("source");
+
+      const min = 14; /* readable minimum */
+      let low = min;
+      let high = Math.min(window.innerHeight, 1400); /* upper bound */
+
+      const fits = function (sizePx) {
+        quoteEl.style.fontSize = String(sizePx) + "px";
+        /* Available = viewport height - body padding - source height - spacing */
+        const bodyStyles = getComputedStyle(document.body);
+        const padTop = parseFloat(bodyStyles.paddingTop);
+        const padBottom = parseFloat(bodyStyles.paddingBottom);
+        const available = document.documentElement.clientHeight - padTop - padBottom - sourceEl.offsetHeight - 16;
+        return quoteEl.scrollHeight <= available;
+      };
+
+      if (!fits(low)) return; /* if even the minimum doesn't fit, leave it */
+
+      while (fits(high)) { low = high; high = Math.floor(high * 1.25); if (high > 2200) break; }
+
+      for (let i = 0; i < 22; i++) {
+        const mid = Math.floor((low + high) / 2);
+        if (fits(mid)) { low = mid; } else { high = mid - 1; }
+      }
+      quoteEl.style.fontSize = String(low) + "px";
+    }
+
+    let current = null;
+    let ENTRIES = [];
+
+    function renderRandom() {
+      if (!ENTRIES.length) return;
+      current = pickRandom(ENTRIES);
+      document.getElementById("quote").textContent = current.quote;
+      document.getElementById("source").textContent = current.source;
+      requestAnimationFrame(fitQuoteToViewport);
+    }
+
+    function refitOnResize() {
+      if (!current) return;
+      requestAnimationFrame(fitQuoteToViewport);
+    }
+
+    window.addEventListener("resize", refitOnResize);
+    window.addEventListener("orientationchange", function () { setTimeout(refitOnResize, 50); });
+
+    async function loadFortunes() {
+      try {
+        const res = await fetch(FORTUNE_PATH, { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const text = await res.text();
+        ENTRIES = parseEntries(text);
+        if (!ENTRIES.length) throw new Error("No entries parsed. Check file format.");
+        renderRandom();
+      } catch (err) {
+        var q = document.getElementById("quote");
+        var s = document.getElementById("source");
+        q.textContent = "Could not load fortunes from \"" + FORTUNE_PATH + "\".";
+        s.innerHTML =
+          "Ensure this file is served over http(s) and that the fortunes file exists at <code>" +
+          FORTUNE_PATH +
+          "</code> using the fortune format (entries separated by a line with just <code>%</code>, last line in parentheses).";
+        s.style.color = "#b00020";
+      }
+    }
+
+    loadFortunes();
+  </script>
+</body>
+</html>
